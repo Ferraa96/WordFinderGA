@@ -53,6 +53,9 @@ generation_t *allocatePopulations(int wordLength) {
     return gen;
 }
 
+/**
+ * creates a random population of POPNUM random strings 
+*/
 void createPopulation(ind_t *population, int wordLength) {
     for(int i = 0; i < POPNUM; i++) {
         for(int j = 0; j < wordLength; j++) {
@@ -62,6 +65,9 @@ void createPopulation(ind_t *population, int wordLength) {
     }
 }
 
+/**
+ * fitness = number of correct character in the string
+*/
 void calculateFitness(ind_t *ind, char *toGuess) {
     int wordlength = strlen(toGuess);
     float fitness = 0;
@@ -75,12 +81,18 @@ void calculateFitness(ind_t *ind, char *toGuess) {
     ind->fitness = fitness;
 }
 
+/**
+ * mutates one character in a random position
+*/
 void mutate(ind_t *ind) {
     int wordLen = strlen(ind->word), pos = rand() % wordLen;
     
     ind->word[pos] = availableChar(rand() % (MAXCHAR + 1));
 }
 
+/**
+ * single-point crossover
+*/
 void crossover(ind_t *son, ind_t *father, ind_t *mother) {
     int wordLength = strlen(father->word), crossoverPoint = rand() % (wordLength + 1), index;
     float random;
@@ -137,6 +149,9 @@ void terminate(char *string, generation_t *gen) {
     free(string);
 }
 
+/**
+ * runs the genetic algorithm until the input word is found
+*/
 void geneticAlgorithm(char *toGuess) {
     int generation = 1, totalFit, wordLength = strlen(toGuess);
     int bestFitness = 0;
