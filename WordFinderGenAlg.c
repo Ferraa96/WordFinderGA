@@ -2,32 +2,26 @@
 #include<stdlib.h>
 #include<string.h>
 #include<malloc.h>
+#include<math.h>
 
 #define MAXCHAR 84
 #define POPNUM 20
-#define MUTATIONRATE 0.1
+#define MUTATIONRATE 0.1                                //mutation rate per allele
+
+//1: roulette wheel, 2: rank selection, 3: Boltzmann selection
+#define SELECTION 3
 
 typedef struct {
     char *word;
-    int fitness;
+    float fitness;
 } ind_t;
 
 typedef struct {
     ind_t *actualGen;
     ind_t *newGen;
+    float best;
+    int gen;
 } generation_t;
-
-/*char availableChar(char random) {                     //from 0 to 52
-
-    if(random < 26) {                                   //LETTERS
-        random += 65;
-    } else if(random < 52) {                            //letters
-        random += 71;
-    } else {
-        random = 32;                                    //space
-    }
-    return random;
-}*/
 
 char availableChar(char random) {                       //from 0 to 84
 
@@ -53,9 +47,6 @@ generation_t *allocatePopulations(int wordLength) {
     return gen;
 }
 
-/**
- * creates a random population of POPNUM random strings 
-*/
 void createPopulation(ind_t *population, int wordLength) {
     for(int i = 0; i < POPNUM; i++) {
         for(int j = 0; j < wordLength; j++) {
@@ -65,9 +56,6 @@ void createPopulation(ind_t *population, int wordLength) {
     }
 }
 
-/**
- * fitness = number of correct character in the string
-*/
 void calculateFitness(ind_t *ind, char *toGuess) {
     int wordlength = strlen(toGuess);
     float fitness = 0;
@@ -81,18 +69,12 @@ void calculateFitness(ind_t *ind, char *toGuess) {
     ind->fitness = fitness;
 }
 
-/**
- * mutates one character in a random position
-*/
 void mutate(ind_t *ind) {
     int wordLen = strlen(ind->word), pos = rand() % wordLen;
     
     ind->word[pos] = availableChar(rand() % (MAXCHAR + 1));
 }
 
-/**
- * single-point crossover
-*/
 void crossover(ind_t *son, ind_t *father, ind_t *mother) {
     int wordLength = strlen(father->word), crossoverPoint = rand() % (wordLength + 1), index;
     float random;
@@ -105,25 +87,31 @@ void crossover(ind_t *son, ind_t *father, ind_t *mother) {
     }
 }
 
-/**
- * roulette wheel
-*/
-ind_t *selection(int fitnessSum, generation_t *gen) {
-    int index1, index2, partialSum, random;
+int cmpFunction(const void *a, const void *b) {
+    return ((ind_t*) a) -> fitness - ((ind_t*) b) -> fitness;
+}
+
+ind_t *select(generation_t *gen) {
+    int index1, index2;
+    float fitnessSum = 0, partialSum, random;
+
+    for(int i = 0; i < POPNUM; i++) {
+        fitnessSum += gen -> actualGen[i].fitness;
+    }
 
     if(fitnessSum != 0) {
         for(int i = 1; i < POPNUM; i++) {
-            random = rand() % (fitnessSum + 1);
+            random = (float) rand() / (float) (RAND_MAX) * fitnessSum;
             index1 = 0;
             partialSum = gen -> actualGen[0].fitness;
-            while(random > partialSum) {
+            while(partialSum < random) {
                 index1++;
                 partialSum += gen -> actualGen[index1].fitness;
             }
-            random = rand() % (fitnessSum + 1);
+            random = (float) rand() / (float) (RAND_MAX) * fitnessSum;
             index2 = 0;
             partialSum = gen -> actualGen[0].fitness;
-            while(random > partialSum) {
+            while(partialSum < random) {
                 index2++;
                 partialSum += gen -> actualGen[index2].fitness;
             }
@@ -138,6 +126,38 @@ ind_t *selection(int fitnessSum, generation_t *gen) {
     }
 }
 
+/**
+ * rank selection 
+*/
+void rankSelection(generation_t *gen) {
+    qsort(gen->actualGen, POPNUM, sizeof(ind_t), cmpFunction);
+    for(int i = 0; i < POPNUM; i++) {
+        gen->actualGen[i].fitness = (float) 1 / (i + 2);
+    }
+    select(gen);
+}
+
+/*
+ * Boltzmann selection
+*/
+void boltzmannSelection(generation_t *gen) {
+    float t, a;
+
+    for(int i = 0; i < POPNUM; i++) {
+        t = (float) rand() / (float) (RAND_MAX) * 95 + 5;   //[5, 100]
+        a = (float) rand() / (float) (RAND_MAX);            //[0, 1]
+        gen->actualGen[i].fitness = exp(- (gen->best - gen->actualGen[i].fitness) / (t * (1 - a)));
+    }
+    select(gen);
+}
+
+/**
+ * roulette wheel
+*/
+void rouletteWheel(generation_t *gen) {
+    select(gen);
+}
+
 void terminate(char *string, generation_t *gen) {
     for(int i = 0; i < POPNUM; i++) {
         free(gen->actualGen[i].word);
@@ -149,41 +169,56 @@ void terminate(char *string, generation_t *gen) {
     free(string);
 }
 
-/**
- * runs the genetic algorithm until the input word is found
-*/
 void geneticAlgorithm(char *toGuess) {
-    int generation = 1, totalFit, wordLength = strlen(toGuess);
-    int bestFitness = 0;
+    void (*selection_ptr)(generation_t *gen);
+    int wordLength = strlen(toGuess);
     float random;
     ind_t *temp;
     char *best;
+
+    switch (SELECTION) {
+    case 1:
+        selection_ptr = &rouletteWheel;
+        break;
+    case 2:
+        selection_ptr = &rankSelection;
+        break;
+    case 3:
+        selection_ptr = &boltzmannSelection;
+        break;
+    default:
+        printf("Error\n");
+        return;
+    }
     
     generation_t *gen = allocatePopulations(wordLength);
+    gen->best = 0;
+    gen->gen = 1;
+
     createPopulation(gen->actualGen, wordLength);
     best = malloc((wordLength + 1) * sizeof(char));
     
-    while(bestFitness < wordLength) {
-        totalFit = 0;
+    while(gen->best < wordLength) {
         for(int i = 0; i < POPNUM; i++) {
             calculateFitness(&gen->actualGen[i], toGuess);
-            totalFit += gen->actualGen[i].fitness;
-            if(gen->actualGen[i].fitness > bestFitness) {
-                printf("\n%d: %s %d/%d", generation, gen->actualGen[i].word, gen->actualGen[i].fitness, wordLength);
-                bestFitness = gen->actualGen[i].fitness;
+            //printf("%d: %s %.0f\n", generation, gen->actualGen[i].word, gen->actualGen[i].fitness);
+            if(gen->actualGen[i].fitness > gen->best) {
+                printf("\n%d: %s %.0f", gen->gen, gen->actualGen[i].word, gen->actualGen[i].fitness);
+                gen->best = gen->actualGen[i].fitness;
                 strcpy(best, gen->actualGen[i].word);
-                if(bestFitness == wordLength) {
-                    printf("\nFounded in generation %d\n%s\n", generation, gen->actualGen[i].word);
+                if(gen->best == wordLength) {
+                    printf("\nFounded in generation %d\n%s\n", gen->gen, gen->actualGen[i].word);
                     terminate(toGuess, gen);
                     return;
                 }
             }
         }
-        //printf("%d: %s %d/%d\n", generation, best, bestFitness, wordLength);
-        generation++;
+        //printf("%d: %s %.0f %d\n", generation, best, bestFitness, wordLength);
+        gen->gen++;
         strcpy(gen->newGen[0].word, best);
-        gen->newGen[0].fitness = bestFitness;
-        selection(totalFit, gen);
+        gen->newGen[0].fitness = gen->best;
+
+        (selection_ptr)(gen);
 
         temp = gen->actualGen;
         gen->actualGen = gen->newGen;
@@ -203,9 +238,10 @@ int main() {
     char *toGuess = malloc(lenMax * sizeof(char)), dummy;
 
     printf("Enter the string: ");
-	int c = EOF;
+    int c;
 	unsigned int i = 0;
-	while ((c = getchar()) != '\n' && c != EOF) {
+	
+    while ((c = getchar()) != '\n' && c != EOF) {
 		toGuess[i] = (char) c;
         i++;
 		if(i == currentSize) {
